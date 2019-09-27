@@ -1,5 +1,4 @@
-var JXON = require("jxon");
-JXON.config({attrPrefix: '@'});
+import GPX from 'gpx-parser-builder';
 
 function togpx( geojson, options ) {
   options = (function (defaults, options) {
@@ -67,6 +66,43 @@ function togpx( geojson, options ) {
     if (options.featureLink)
       o.link = { "@href": options.featureLink(f.properties) }
   }
+
+  // convert the togpx gpx object to an object which can be used by gpx-parser-builder
+  function toGpxBuilderObject(gpx) {
+    let gpxBuilderObject = {};
+    for (let prop in gpx) {
+      if( gpx.hasOwnProperty( prop ) ) {
+        console.log("o." + prop + " = " + gpx[prop]);
+        if (prop.startsWith('@')) {
+          const key = prop.substr(1);
+          if (!gpxBuilderObject['$']) {
+            gpxBuilderObject['$'] = {};
+          }
+          if (typeof gpx[prop] === 'object') {
+            if (gpx[prop] instanceof Array) {
+              gpxBuilderObject['$'][key] = gpx[prop].map(item => {return toGpxBuilderObject(item)});
+            } else {
+              gpxBuilderObject['$'][key] = toGpxBuilderObject(gpx[prop]);
+            }
+          } else {
+            gpxBuilderObject['$'][key] = gpx[prop];
+          }
+        } else {
+          if (typeof gpx[prop] === 'object') {
+            if (gpx[prop] instanceof Array) {
+              gpxBuilderObject[prop] = gpx[prop].map(item => {return toGpxBuilderObject(item)});
+            } else {
+              gpxBuilderObject[prop] = toGpxBuilderObject(gpx[prop]);
+            }
+          } else {
+            gpxBuilderObject[prop] = gpx[prop];
+          }
+        }
+      } 
+    }
+    return gpxBuilderObject;
+  }
+  
   // make gpx object
   var gpx = {"gpx": {
     "@xmlns":"http://www.topografix.com/GPX/1/1",
@@ -91,6 +127,7 @@ function togpx( geojson, options ) {
     features = [geojson];
   else
     features = [{type:"Feature", properties: {}, geometry: geojson}];
+  let o = {};
   features.forEach(function mapFeature(f) {
     switch (f.geometry.type) {
     // POIs
@@ -99,17 +136,17 @@ function togpx( geojson, options ) {
       var coords = f.geometry.coordinates;
       if (f.geometry.type == "Point") coords = [coords];
       coords.forEach(function (coordinates) {
-        o = {
+        let pt = {
           "@lat": coordinates[1],
           "@lon": coordinates[0],
           "name": options.featureTitle(f.properties),
           "desc": options.featureDescription(f.properties)
         };
         if (coordinates[2] !== undefined) {
-          o.ele = coordinates[2];
+          pt.ele = coordinates[2];
         }
-        add_feature_link(o,f);
-        gpx.gpx.wpt.push(o);
+        add_feature_link(pt,f);
+        gpx.gpx.wpt.push(pt);
       });
       break;
     // LineStrings
@@ -127,17 +164,17 @@ function togpx( geojson, options ) {
       coords.forEach(function(coordinates) {
         var seg = {trkpt: []};
         coordinates.forEach(function(c, i) {
-          var o = {
+          let pt = {
             "@lat": c[1],
             "@lon":c[0]
           };
           if (c[2] !== undefined) {
-            o.ele = c[2];
+            pt.ele = c[2];
           }
           if (times && times[i]) {
-            o.time = times[i];
+            pt.time = times[i];
           }
-          seg.trkpt.push(o);
+          seg.trkpt.push(pt);
         });
         o.trkseg.push(seg);
       });
@@ -160,7 +197,7 @@ function togpx( geojson, options ) {
           var seg = {trkpt: []};
           var i = 0;
           ring.forEach(function(c) {
-            var o = {
+            let o = {
               "@lat": c[1],
               "@lon":c[0]
             };
@@ -191,8 +228,9 @@ function togpx( geojson, options ) {
       console.log("warning: unsupported geometry type: "+f.geometry.type);
     }
   });
-  gpx_str = JXON.stringify(gpx);
+  let gpxBuilderObject = toGpxBuilderObject(gpx.gpx);
+  const gpx_str = new GPX(gpxBuilderObject).toString();
   return gpx_str;
 };
 
-module.exports = togpx;
+export default togpx;
